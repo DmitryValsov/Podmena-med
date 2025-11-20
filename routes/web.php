@@ -66,15 +66,25 @@ Route::middleware(['auth', 'verified'])
         Route::post('/schedule/seed-demo', [ScheduleController::class, 'seedDemo'])
             ->name('schedule.seed-demo');
 
+        // Экспорт расписания в CSV (открывается в Excel)
+        Route::get('/schedule/export', [ScheduleController::class, 'exportCsv'])
+            ->name('schedule.export');
+
+        // Импорт расписания из CSV
+        Route::post('/schedule/import', [ScheduleController::class, 'importCsv'])
+            ->name('schedule.import');
+
         // --- Заявки на подмену: действия старшей медсестры ---
 
         // Утвердить подмену
-        Route::post('/schedule/swaps/{swap}/approve', [ScheduleController::class, 'approveSwap'])
-            ->name('schedule.swaps.approve');
+        // фронт: axios.post(`/admin/swaps/${swap.id}/approve`)
+        Route::post('/swaps/{swap}/approve', [ScheduleController::class, 'approveSwap'])
+            ->name('swaps.approve');
 
         // Отклонить подмену
-        Route::post('/schedule/swaps/{swap}/decline', [ScheduleController::class, 'declineSwap'])
-            ->name('schedule.swaps.decline');
+        // фронт: axios.post(`/admin/swaps/${swap.id}/reject`)
+        Route::post('/swaps/{swap}/reject', [ScheduleController::class, 'rejectSwap'])
+            ->name('swaps.reject');
     });
 
 /*

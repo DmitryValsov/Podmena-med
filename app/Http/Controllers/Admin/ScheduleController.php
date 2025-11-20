@@ -8,7 +8,9 @@ use App\Models\ShiftSwap;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ScheduleController extends Controller
 {
@@ -70,7 +72,7 @@ class ScheduleController extends Controller
         }
 
         // Заявки на подмену для панели старшей
-        // ВАЖНО: вместо FIELD() — CASE, чтобы работало в SQLite
+        // вместо FIELD() — CASE, чтобы работало в SQLite
         $swapRequests = ShiftSwap::with(['requester', 'responder', 'target'])
             ->orderByRaw("
                 CASE status
@@ -265,7 +267,7 @@ class ScheduleController extends Controller
             ->orderBy('id')
             ->get();
 
-        \DB::transaction(function () use ($users, $year, $month, $start, $end, $daysInMonth) {
+        DB::transaction(function () use ($users, $year, $month, $start, $end, $daysInMonth) {
             // Сначала очищаем этот месяц
             Shift::whereBetween('date', [$start, $end])->delete();
 
@@ -308,7 +310,175 @@ class ScheduleController extends Controller
     }
 
     /**
+     * Экспорт расписания за выбранный месяц в CSV (открывается в Excel).
+     * Маршрут: GET /admin/schedule/export
+     * Параметры: ?year=2025&month=11 (как в index)
+     */
+    public function exportCsv(Request $request): StreamedResponse
+    {
+        $year  = (int) $request->input('year', now()->year);
+        $month = (int) $request->input('month', now()->month);
+
+        $start = Carbon::create($year, $month, 1)->startOfDay();
+        $end   = (clone $start)->endOfMonth();
+
+        $rows = Shift::with('user.department')
+            ->whereBetween('date', [$start, $end])
+            ->orderBy('user_id')
+            ->orderBy('date')
+            ->get();
+
+        $fileName = sprintf('schedule_%d_%02d.csv', $year, $month);
+
+        return response()->streamDownload(function () use ($rows) {
+            $handle = fopen('php://output', 'w');
+
+            // Для русской Excel часто удобнее ;, а не ,
+            $delimiter = ';';
+
+            // Заголовок
+            fputcsv($handle, [
+                'user_id',
+                'user_name',
+                'department',
+                'date',
+                'shift_type',
+                'start_time',
+                'end_time',
+                'post',
+            ], $delimiter);
+
+            foreach ($rows as $shift) {
+                /** @var Shift $shift */
+                fputcsv($handle, [
+                    $shift->user_id,
+                    $shift->user?->name,
+                    $shift->user?->department?->name,
+                    $shift->date?->toDateString(),
+                    $shift->type,
+                    $shift->start_time?->format('H:i'),
+                    $shift->end_time?->format('H:i'),
+                    $shift->post,
+                ], $delimiter);
+            }
+
+            fclose($handle);
+        }, $fileName, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    /**
+     * Импорт расписания из CSV.
+     * Ожидаемые колонки: user_id,date,shift_type,start_time,end_time,post
+     * Маршрут: POST /admin/schedule/import
+     * Тело: file (csv/txt)
+     */
+    public function importCsv(Request $request)
+    {
+        $data = $request->validate([
+            'file' => ['required', 'file', 'mimes:csv,txt'],
+        ]);
+
+        $file = $data['file'];
+
+        $path = $file->getRealPath();
+
+        if (! $path) {
+            return back()->with('error', 'Не удалось прочитать файл.');
+        }
+
+        $handle = fopen($path, 'r');
+        if (! $handle) {
+            return back()->with('error', 'Не удалось открыть файл.');
+        }
+
+        $delimiter = ';'; // должен совпадать с exportCsv
+
+        // читаем заголовок
+        $header = fgetcsv($handle, 0, $delimiter);
+        if (! $header) {
+            fclose($handle);
+            return back()->with('error', 'Файл пустой или неверный формат.');
+        }
+
+        // приводим заголовки к нижнему регистру
+        $header = array_map('trim', $header);
+        $headerLower = array_map('mb_strtolower', $header);
+
+        $getIndex = function (string $name) use ($headerLower) {
+            $name = mb_strtolower($name);
+            $idx = array_search($name, $headerLower, true);
+            return $idx === false ? null : $idx;
+        };
+
+        $idxUserId    = $getIndex('user_id');
+        $idxDate      = $getIndex('date');
+        $idxShiftType = $getIndex('shift_type');
+        $idxStart     = $getIndex('start_time');
+        $idxEnd       = $getIndex('end_time');
+        $idxPost      = $getIndex('post');
+
+        if ($idxUserId === null || $idxDate === null || $idxShiftType === null) {
+            fclose($handle);
+            return back()->with('error', 'В файле должны быть колонки user_id, date, shift_type.');
+        }
+
+        DB::beginTransaction();
+
+        try {
+            while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
+                // пропускаем пустые строки
+                if (count(array_filter($row, fn($v) => $v !== null && $v !== '')) === 0) {
+                    continue;
+                }
+
+                $userId    = $row[$idxUserId] ?? null;
+                $dateStr   = $row[$idxDate] ?? null;
+                $shiftType = $row[$idxShiftType] ?? null;
+                $startStr  = $idxStart !== null ? ($row[$idxStart] ?? null) : null;
+                $endStr    = $idxEnd   !== null ? ($row[$idxEnd]   ?? null) : null;
+                $postStr   = $idxPost  !== null ? ($row[$idxPost]  ?? null) : null;
+
+                if (! $userId || ! $dateStr) {
+                    continue;
+                }
+
+                // если тип смены пустой — трактуем как очистку ячейки
+                if ($shiftType === null || $shiftType === '') {
+                    Shift::where('user_id', $userId)
+                        ->whereDate('date', $dateStr)
+                        ->delete();
+                    continue;
+                }
+
+                $shift = Shift::firstOrNew([
+                    'user_id' => $userId,
+                    'date'    => $dateStr,
+                ]);
+
+                $shift->type       = $shiftType;
+                $shift->start_time = $startStr ?: null;
+                $shift->end_time   = $endStr ?: null;
+                $shift->post       = $postStr ?: null;
+                $shift->save();
+            }
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            fclose($handle);
+            return back()->with('error', 'Ошибка при импорте: '.$e->getMessage());
+        }
+
+        fclose($handle);
+
+        return back()->with('success', 'Импорт расписания выполнен.');
+    }
+
+    /**
      * Старшая медсестра утверждает заявку на подмену.
+     * Маршрут: POST /admin/swaps/{swap}/approve
      */
     public function approveSwap(Request $request, ShiftSwap $swap)
     {
@@ -329,6 +499,7 @@ class ScheduleController extends Controller
 
     /**
      * Старшая медсестра отклоняет заявку на подмену.
+     * Маршрут: POST /admin/swaps/{swap}/reject
      */
     public function rejectSwap(Request $request, ShiftSwap $swap)
     {

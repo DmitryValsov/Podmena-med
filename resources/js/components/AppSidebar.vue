@@ -24,13 +24,13 @@ const mainNavItems: NavItem[] = [
         icon: LayoutGrid,
     },
     {
-        title: 'Распиание админ',
-        href: '/admin/raspisanie/',
+        title: 'Расписание админ',
+        href: '/admin/schedule/',
         icon: BookOpen,
     },
     {
-        title: 'Распиание медсестра',
-        href: '/user/raspisanie/',
+        title: 'Расписание медсестра',
+        href: '/user/schedule/',
         icon: Folder,
     },
 ];

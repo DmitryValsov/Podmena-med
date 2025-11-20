@@ -134,8 +134,8 @@ function restConflict(row, day) {
 
     const prevLen = hoursBetween(prevStart, prevEnd);
     const restH =
-        (24 - prevLen) + // от конца прошлой смены до полуночи
-        hoursBetween('00:00', curStart); // от полуночи до начала текущей
+        (24 - prevLen) +
+        hoursBetween('00:00', curStart);
 
     return restH < 12;
 }
@@ -143,13 +143,9 @@ function restConflict(row, day) {
 function cellColor(row, day) {
     const rc = rowCells(row)[day];
 
-    // ПУСТАЯ ЯЧЕЙКА — ЯРКАЯ
+    // ПУСТАЯ ЯЧЕЙКА — ЯРКАЯ,
     if (!rc || !rc.type) {
-        // tailwind-яркость, можно подбирать:
         return 'bg-pink-300 border-pink-500';
-        // варианты:
-        // 'bg-fuchsia-300 border-fuchsia-600'
-        // 'bg-rose-300 border-rose-600'
     }
 
     if (rc.type === 'home_day' || rc.type === 'home_night') {
@@ -161,12 +157,9 @@ function cellColor(row, day) {
     return 'bg-emerald-50 border-emerald-200';
 }
 
-
-
 function mobileChipColor(row, day) {
     const rc = rowCells(row)[day];
 
-    // ПУСТО — ЯРКО
     if (!rc || !rc.type) {
         return 'bg-pink-300 border-pink-500 text-pink-950';
     }
@@ -179,8 +172,6 @@ function mobileChipColor(row, day) {
     }
     return 'bg-emerald-50 border-emerald-200 text-emerald-800';
 }
-
-
 
 // ---- фильтрация сотрудников ----
 const filteredRows = computed(() =>
@@ -236,26 +227,20 @@ watch(
 
         const form = modal.value.form;
 
-        // если тип сбросили — очищаем время
         if (!type) {
             form.start = '';
             form.end   = '';
             return;
         }
 
-        // если пользователь изменил тип вручную — ставим дефолты
-        // (но оставляем как есть, если это не первое заполнение и тип не менялся)
         const { start, end } = defaultTimesByType(type);
 
-        // логика: если в текущей сессии модалки уже есть какое-то время И тип меняется —
-        // мы считаем, что пользователь сознательно меняет тип, и обновляем время.
         if (oldType && (form.start || form.end)) {
             form.start = start;
             form.end   = end;
             return;
         }
 
-        // если ячейка была пустая — ставим дефолты
         if (!form.start && !form.end) {
             form.start = start;
             form.end   = end;
@@ -374,7 +359,7 @@ async function seedDemo(showToast = true) {
     }
 }
 
-// ---- шаблон и массовое назначение (пока только фронт, без БД) ----
+// ---- шаблон и массовое назначение (только фронт) ----
 function openTemplate() {
     filteredRows.value.forEach((row, idx) => {
         const rc = rowCells(row);
@@ -431,9 +416,54 @@ function endDrag(row, day, ev) {
     ev.currentTarget.classList.remove('drag-hover');
 }
 
-// ---- approve / export (пока демо) ----
+// ---- approve / export / import ----
 function approveAll() { toast('График утверждён (демо)'); }
-function exportMock() { toast('Экспорт сформирован (демо)'); }
+
+// экспорт в CSV/Excel (браузер скачает файл)
+function exportSchedule() {
+    const y = year.value;
+    const m = month.value + 1;
+    window.location = `/admin/schedule/export?year=${y}&month=${m}`;
+}
+
+// импорт CSV/Excel
+const importBusy = ref(false);
+const importInput = ref(null);
+
+function clickImport() {
+    if (importBusy.value) return;
+    importInput.value?.click();
+}
+
+async function handleImportChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = ''; // сбрасываем, чтобы можно было выбрать тот же файл снова
+
+    if (!file) return;
+
+    importBusy.value = true;
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        await axios.post('/admin/schedule/import', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+
+        toast('Импорт выполнен');
+        // перезагружаем текущий месяц
+        router.get('/admin/schedule', { year: year.value, month: month.value + 1 }, {
+            preserveScroll: true,
+            preserveState:  false,
+        });
+    } catch (e) {
+        toast('Ошибка импорта');
+    } finally {
+        importBusy.value = false;
+    }
+}
 
 // ---- АДМИН УТВЕРЖДАЕТ / ОТКЛОНЯЕТ ЗАЯВКИ НА ПОДМЕНУ ----
 function swapStatusLabel(s) {
@@ -580,19 +610,34 @@ function toast(text) {
                     </div>
                 </div>
             </div>
-            <div class="hidden md:flex items-center gap-2">
+            <div class="hidden md:flex items-center gap-2 text-sm">
                 <button
                     @click="approveAll"
-                    class="px-4 py-2 rounded-xl bg-white text-indigo-700 font-medium shadow-sm hover:bg-indigo-50 text-sm"
+                    class="px-4 py-2 rounded-xl bg-white text-indigo-700 font-medium shadow-sm hover:bg-indigo-50"
                 >
                     Утвердить график
                 </button>
                 <button
-                    @click="exportMock"
-                    class="px-4 py-2 rounded-xl bg-white/10 ring-1 ring-white/40 hover:bg-white/15 text-sm"
+                    @click="exportSchedule"
+                    class="px-4 py-2 rounded-xl bg-white/10 ring-1 ring-white/40 hover:bg-white/15"
                 >
-                    Экспорт PDF/Excel
+                    Экспорт Excel
                 </button>
+                <button
+                    @click="clickImport"
+                    class="px-4 py-2 rounded-xl bg-white/10 ring-1 ring-white/40 hover:bg-white/15 flex items-center gap-1"
+                    :disabled="importBusy"
+                >
+                    <span v-if="importBusy" class="spinner"></span>
+                    <span>Импорт Excel</span>
+                </button>
+                <input
+                    ref="importInput"
+                    type="file"
+                    class="hidden"
+                    accept=".csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                    @change="handleImportChange"
+                >
             </div>
         </div>
     </header>
