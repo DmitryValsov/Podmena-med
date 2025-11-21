@@ -75,7 +75,6 @@ const user = page.props.auth.user;
                         />
                         <InputError class="mt-2" :message="errors.standart_hours" />
                     </div>
-
                     <div class="grid gap-2">
                         <Label for="department_id">Отделение</Label>
                         <Input

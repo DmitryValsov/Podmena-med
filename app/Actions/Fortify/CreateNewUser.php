@@ -43,6 +43,7 @@ class CreateNewUser implements CreatesNewUsers
             'email'          => $input['email'],
             'standart_hours' => $input['standart_hours'] ?? null,
             'department_id'  => $input['department_id'] ?? null,
+            //'isAdmin'        => $input['isAdmin'] ?? null,
 
             // ВАЖНО: пароль в БД всегда в хэше
             'password'       => Hash::make($input['password']),

@@ -2,6 +2,13 @@
 import { Head, usePage, router } from '@inertiajs/vue3';
 import { computed, ref, watch, nextTick } from 'vue';
 import axios from 'axios';
+import {BookOpen} from "lucide-vue-next";
+
+const user = usePage().props.auth.user
+
+if (user.isAdmin !== 1) {
+    router.visit('/')  //  не админ — уходи
+}
 
 // ---- утилиты ----
 const pad = n => String(n).padStart(2, '0');
@@ -27,6 +34,9 @@ const ru = {
 
 // ---- props из Laravel / Inertia ----
 const page  = usePage();
+
+
+
 
 // локальное состояние, синхронизируемое с props
 const year  = ref(page.props.year);       // число, например 2025
@@ -81,6 +91,15 @@ function defaultTimesByType(type) {
         case '24h':        return { start: '08:00', end: '08:00' };
         case 'home_day':   return { start: '12:00', end: '24:00' };
         case 'home_night': return { start: '00:00', end: '08:00' };
+        case '7:12h': return { start: '12:48', end: '20:00' };
+        case '7-12h': return { start: '08:00', end: '15:12' };
+        case '6h': return { start: '08:00', end: '14:00' };
+        case '8:18h': return { start: '08:00', end: '16:18' };
+        case '8-18h': return { start: '11:42', end: '20:00' };
+        case '10h': return { start: '14:00', end: '00:00' };
+        case '8-h': return { start: '00:00', end: '08:00' };
+        case '16h': return { start: '08:00', end: '00:00' };
+        case '7:36h': return { start: '16:18', end: '00:00' };
         default:           return { start: '', end: '' };
     }
 }
@@ -600,7 +619,7 @@ function toast(text) {
                 </div>
                 <div class="space-y-0.5">
                     <div class="text-xs text-white/80">
-                        Старшая медсестра: {{ page.props.auth.user.name }}
+                        Сотрудник: {{ page.props.auth.user.name }}
                     </div>
                     <div class="text-lg font-semibold tracking-tight">
                         Панель планирования
@@ -683,26 +702,7 @@ function toast(text) {
                 </div>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2 text-sm">
-                <button @click="seedDemo(true)" class="px-3 py-2 rounded-xl border bg-white hover:bg-slate-50">
-                    Демо-данные
-                </button>
-                <button @click="openTemplate" class="px-3 py-2 rounded-xl border bg-white hover:bg-slate-50">
-                    Шаблон 1/2 смен
-                </button>
-                <button @click="clearMonth" class="px-3 py-2 rounded-xl border bg-white hover:bg-slate-50">
-                    Очистить месяц
-                </button>
-                <button @click="openCreateMany" class="px-3 py-2 rounded-xl border bg-white hover:bg-slate-50">
-                    Массовое назначение
-                </button>
-                <button
-                    @click="openCreateUser"
-                    class="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100"
-                >
-                    + Сотрудник
-                </button>
-            </div>
+
         </div>
     </div>
 
@@ -865,7 +865,7 @@ function toast(text) {
                             <div class="px-3 py-2">
                                 <div class="font-medium text-slate-900">{{ row.name }}</div>
                                 <div class="text-xs text-slate-500">
-                                    {{ row.role }} • {{ row.department }}
+                                    Сотрудник • {{ row.department }}
                                 </div>
                                 <div class="text-xs text-slate-600">
                                     FTE: <b>{{ row.fte }}</b>
@@ -1035,6 +1035,18 @@ function toast(text) {
                             <option value="12n">12 часов (20–08)</option>
                             <option value="15h">15 часов (09–24)</option>
                             <option value="24h">24 часа (08–08)</option>
+                            <option value="7:12h">7 часов 12 минут (12:48-20:00)</option>
+                            <option value="7-12h">7 часов 12 минут (8:00–15:12)</option>
+                            <option value="6h">6 часов (8:00–14:00)</option>
+                            <option value="8:18h">8 часов 18 минут (8:00–16:18)</option>
+                            <option value="8-18h">8 часов 18 минут (11:42–20:00)</option>
+
+                            <option value="10h">10 часов (14:00–24:00)</option>
+                            <option value="8-h">8 часов (00:00–08:00)</option>
+
+                            <option value="7:36h">7 часов 42 минуты (16:18–24:00)</option>
+
+                            <option value="16h">16 часов (08:00–24:00)</option>
                             <option value="home_day">
                                 Дежурство на дому (12–24)
                             </option>

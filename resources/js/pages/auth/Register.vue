@@ -40,6 +40,11 @@ import { LoaderCircle } from 'lucide-vue-next';
                     <InputError :message="errors.name" />
                 </div>
 
+
+
+
+
+
                 <div class="grid gap-2">
                     <Label for="name">Норма часов</Label>
                     <Input
@@ -66,7 +71,7 @@ import { LoaderCircle } from 'lucide-vue-next';
                         autocomplete="department_id"
                         name="department_id"
                         placeholder="Хирургия"
-                        value="1"
+                        value="2"
                     />
                     <InputError :message="errors.department_id" />
                 </div>
@@ -84,6 +89,8 @@ import { LoaderCircle } from 'lucide-vue-next';
                     />
                     <InputError :message="errors.email" />
                 </div>
+
+
 
                 <div class="grid gap-2">
                     <Label for="password">Пароль</Label>

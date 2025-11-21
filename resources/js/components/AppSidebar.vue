@@ -17,23 +17,37 @@ import { Link, usePage } from '@inertiajs/vue3';
 import { BookOpen, Folder, LayoutGrid } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
+
+const page = usePage();
+const user = page.props.auth.user;
+
 const mainNavItems: NavItem[] = [
     {
         title: 'Панель управления',
         href: dashboard(),
         icon: LayoutGrid,
     },
-    {
-        title: 'Расписание админ',
-        href: '/admin/schedule/',
-        icon: BookOpen,
-    },
+
+        ...(user?.isAdmin === 1 ? [
+        {
+            title: 'Расписание админ',
+            href: '/admin/schedule/',
+            icon: BookOpen,
+        }
+    ] : []),
+
+
     {
         title: 'Расписание медсестра',
         href: '/user/schedule/',
         icon: Folder,
     },
 ];
+
+
+
+
+
 
 const footerNavItems: NavItem[] = [
     /*{
@@ -48,8 +62,7 @@ const footerNavItems: NavItem[] = [
     },*/
 ];
 
-const page = usePage();
-const user = page.props.auth.user;
+
 
 </script>
 
