@@ -2,25 +2,36 @@
 import { Head, usePage, router } from '@inertiajs/vue3';
 import { computed, ref, watch, nextTick } from 'vue';
 import axios from 'axios';
-import {BookOpen} from "lucide-vue-next";
 
-const user = usePage().props.auth.user
+const user = usePage().props.auth.user;
 
 if (user.isAdmin !== 1) {
-    router.visit('/')  //  не админ — уходи
+    router.visit('/'); // не админ — уходим
 }
 
 // ---- утилиты ----
 const pad = n => String(n).padStart(2, '0');
 
+/**
+ * Возвращает разницу в часах (с минутами, как дробь),
+ * например 7.27 ч и т.п. Ничего не округляем здесь.
+ */
 function hoursBetween(start, end) {
     if (!start || !end) return 0;
+
     const [sh, sm] = start.split(':').map(Number);
     const [eh, em] = end.split(':').map(Number);
-    let a = sh * 60 + sm;
-    let b = eh * 60 + em;
-    if (b <= a) b += 24 * 60;
-    return Math.round(((b - a) / 60) * 10) / 10;
+
+    let startInMinutes = sh * 60 + sm;
+    let endInMinutes   = eh * 60 + em;
+
+    // если конец меньше/равен началу — это переход через полночь
+    if (endInMinutes <= startInMinutes) {
+        endInMinutes += 24 * 60;
+    }
+
+    const totalMinutes = endInMinutes - startInMinutes;
+    return totalMinutes / 60;
 }
 
 function monthDays(year, monthIndex) { // monthIndex: 0–11
@@ -34,9 +45,6 @@ const ru = {
 
 // ---- props из Laravel / Inertia ----
 const page  = usePage();
-
-
-
 
 // локальное состояние, синхронизируемое с props
 const year  = ref(page.props.year);       // число, например 2025
@@ -91,16 +99,18 @@ function defaultTimesByType(type) {
         case '24h':        return { start: '08:00', end: '08:00' };
         case 'home_day':   return { start: '12:00', end: '24:00' };
         case 'home_night': return { start: '00:00', end: '08:00' };
-        case '7:12h': return { start: '12:48', end: '20:00' };
-        case '7-12h': return { start: '08:00', end: '15:12' };
-        case '6h': return { start: '08:00', end: '14:00' };
-        case '8:18h': return { start: '08:00', end: '16:18' };
-        case '8-18h': return { start: '11:42', end: '20:00' };
-        case '10h': return { start: '14:00', end: '00:00' };
-        case '8-h': return { start: '00:00', end: '08:00' };
-        case '16h': return { start: '08:00', end: '00:00' };
-        case '7:36h': return { start: '16:18', end: '00:00' };
-        default:           return { start: '', end: '' };
+
+        // твои дополнительные типы с минутами
+        case '7:12h':  return { start: '12:48', end: '20:00' };
+        case '7-12h':  return { start: '08:00', end: '15:12' };
+        case '6h':     return { start: '08:00', end: '14:00' };
+        case '8:18h':  return { start: '08:00', end: '16:18' };
+        case '8-18h':  return { start: '11:42', end: '20:00' };
+        case '10h':    return { start: '14:00', end: '00:00' };
+        case '8-h':    return { start: '00:00', end: '08:00' };
+        case '16h':    return { start: '08:00', end: '00:00' };
+        case '7:36h':  return { start: '16:18', end: '00:00' };
+        default:       return { start: '', end: '' };
     }
 }
 
@@ -117,29 +127,51 @@ function timeLabel(row, day) {
     return c && c.start ? `${c.start}–${c.end}` : '';
 }
 
+/**
+ * Сколько часов (с дробью) в одной ячейке.
+ */
 function hoursForCell(c) {
     if (!c || !c.type) return 0;
-    if (c.type === '24h') return 24;
-    return hoursBetween(c.start, c.end);
+
+    if (c.type === '24h') return 24; // полный сутки
+
+    const start = c.start || defaultTimesByType(c.type).start;
+    const end   = c.end   || defaultTimesByType(c.type).end;
+
+    if (!start || !end) return 0;
+
+    return hoursBetween(start, end);
 }
 
+/**
+ * Сколько часов / человека за месяц (с точностью до 0.1 ч).
+ */
 function plannedFor(row) {
     const rc = rowCells(row);
     let s = 0;
     for (let d = 1; d <= daysInMonth.value; d++) {
         s += hoursForCell(rc[d]);
     }
-    return Math.round(s);
+    return Math.round(s * 10) / 10; // одна цифра после запятой
 }
 
+/**
+ * Норма с учётом FTE, тоже округляем до 0.1 ч.
+ */
 function normFor(row) {
-    return Math.round(row.baseNorm * row.fte);
+    const base = Number(row.baseNorm || 0);
+    const fte  = Number(row.fte || 0);
+    return Math.round(base * fte * 10) / 10;
 }
 
 function balanceFor(row) {
-    return normFor(row) - plannedFor(row);
+    const val = normFor(row) - plannedFor(row);
+    return Math.round(val * 10) / 10;
 }
 
+/**
+ * Проверка нарушения отдыха (тут можно считать по часам, не по минутам).
+ */
 function restConflict(row, day) {
     const rc   = rowCells(row);
     const cur  = rc[day];
@@ -151,10 +183,10 @@ function restConflict(row, day) {
     const prevEnd   = prev.end   || defaultTimesByType(prev.type).end;
     const curStart  = cur.start  || defaultTimesByType(cur.type).start;
 
-    const prevLen = hoursBetween(prevStart, prevEnd);
+    const prevLenHours = hoursBetween(prevStart, prevEnd);
     const restH =
-        (24 - prevLen) +
-        hoursBetween('00:00', curStart);
+        (24 - prevLenHours) + // от конца прошлой смены до полуночи
+        hoursBetween('00:00', curStart); // от полуночи до начала текущей
 
     return restH < 12;
 }
@@ -162,7 +194,7 @@ function restConflict(row, day) {
 function cellColor(row, day) {
     const rc = rowCells(row)[day];
 
-    // ПУСТАЯ ЯЧЕЙКА — ЯРКАЯ,
+    // ПУСТАЯ ЯЧЕЙКА — ЯРКАЯ
     if (!rc || !rc.type) {
         return 'bg-pink-300 border-pink-500';
     }
@@ -202,7 +234,7 @@ const filteredRows = computed(() =>
 
 // ---- KPI ----
 const kpiSignificance = computed(() =>
-    filteredRows.value.reduce((a, r) => a + r.fte, 0)
+    filteredRows.value.reduce((a, r) => a + Number(r.fte || 0), 0)
 );
 const kpiNorm = computed(() =>
     filteredRows.value.reduce((a, r) => a + normFor(r), 0)
@@ -210,7 +242,10 @@ const kpiNorm = computed(() =>
 const kpiPlanned = computed(() =>
     filteredRows.value.reduce((a, r) => a + plannedFor(r), 0)
 );
-const kpiBalance = computed(() => kpiNorm.value - kpiPlanned.value);
+const kpiBalance = computed(() => {
+    const val = kpiNorm.value - kpiPlanned.value;
+    return Math.round(val * 10) / 10;
+});
 
 // ---- модалка смены ----
 const modal = ref({
@@ -446,7 +481,7 @@ function exportSchedule() {
 }
 
 // импорт CSV/Excel
-const importBusy = ref(false);
+const importBusy  = ref(false);
 const importInput = ref(null);
 
 function clickImport() {
@@ -456,7 +491,7 @@ function clickImport() {
 
 async function handleImportChange(event) {
     const file = event.target.files?.[0];
-    event.target.value = ''; // сбрасываем, чтобы можно было выбрать тот же файл снова
+    event.target.value = ''; // сброс, чтобы можно было выбрать тот же файл
 
     if (!file) return;
 
@@ -466,13 +501,10 @@ async function handleImportChange(event) {
         formData.append('file', file);
 
         await axios.post('/admin/schedule/import', formData, {
-            headers: {
-                'Content-Type': 'multipart/form-data',
-            },
+            headers: { 'Content-Type': 'multipart/form-data' },
         });
 
         toast('Импорт выполнен');
-        // перезагружаем текущий месяц
         router.get('/admin/schedule', { year: year.value, month: month.value + 1 }, {
             preserveScroll: true,
             preserveState:  false,
@@ -539,10 +571,10 @@ const createUserModal = ref({
 });
 
 function openCreateUser() {
-    createUserModal.value.open = true;
-    createUserModal.value.busy = false;
+    createUserModal.value.open   = true;
+    createUserModal.value.busy   = false;
     createUserModal.value.errors = {};
-    createUserModal.value.form = {
+    createUserModal.value.form   = {
         name: '',
         email: '',
         department: '',
@@ -554,17 +586,17 @@ function openCreateUser() {
 
 async function submitCreateUser() {
     const modal = createUserModal.value;
-    modal.busy = true;
+    modal.busy   = true;
     modal.errors = {};
 
     try {
         const payload = {
-            name:            modal.form.name,
-            email:           modal.form.email,
-            department:      modal.form.department,
-            role:            modal.form.role,
-            fte:             modal.form.fte,
-            standart_hours:  modal.form.baseNorm,
+            name:           modal.form.name,
+            email:          modal.form.email,
+            department:     modal.form.department,
+            role:           modal.form.role,
+            fte:            modal.form.fte,
+            standart_hours: modal.form.baseNorm,
         };
 
         const response = await axios.post('/admin/users', payload);
@@ -701,8 +733,6 @@ function toast(text) {
                     </select>
                 </div>
             </div>
-
-
         </div>
     </div>
 
@@ -726,7 +756,7 @@ function toast(text) {
                     Норма времени
                 </div>
                 <div class="mt-1 text-2xl font-semibold text-slate-900">
-                    {{ kpiNorm }} ч
+                    {{ kpiNorm.toFixed(1) }} ч
                 </div>
                 <div class="mt-1 text-xs text-slate-500">Сумма норм на месяц</div>
             </div>
@@ -735,7 +765,7 @@ function toast(text) {
                     План по сменам
                 </div>
                 <div class="mt-1 text-2xl font-semibold text-slate-900">
-                    {{ kpiPlanned }} ч
+                    {{ kpiPlanned.toFixed(1) }} ч
                 </div>
                 <div class="mt-1 text-xs text-slate-500">Назначено сменами</div>
             </div>
@@ -747,7 +777,7 @@ function toast(text) {
                     class="mt-1 text-2xl font-semibold"
                     :class="kpiBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'"
                 >
-                    {{ kpiBalance }} ч
+                    {{ kpiBalance.toFixed(1) }} ч
                 </div>
                 <div class="mt-1 text-xs text-slate-500">
                     Баланс = Норма − План
@@ -826,9 +856,10 @@ function toast(text) {
                 </div>
             </div>
 
-            <div class="overflow-auto">
-                <table class="min-w-full text-xs grid-sticky">
-                    <thead>
+            <div class="overflow-auto max-h-[70vh]">
+                <table class="min-w-full text-xs table-sticky-header">
+
+                <thead>
                     <tr class="bg-slate-50 text-slate-600">
                         <th
                             class="col-sticky left-0 min-w-[280px] text-left px-3 py-2 border-r border-slate-200"
@@ -869,14 +900,14 @@ function toast(text) {
                                 </div>
                                 <div class="text-xs text-slate-600">
                                     FTE: <b>{{ row.fte }}</b>
-                                    • Норма: <b>{{ normFor(row) }} ч</b>
+                                    • Норма: <b>{{ normFor(row).toFixed(1) }} ч</b>
                                 </div>
                             </div>
                         </td>
 
                         <td class="text-center border-l border-slate-200">
                             <div class="px-2 py-2 font-semibold text-slate-900">
-                                {{ plannedFor(row) }}
+                                {{ plannedFor(row).toFixed(1) }}
                             </div>
                         </td>
                         <td class="text-center border-l border-slate-200">
@@ -888,7 +919,7 @@ function toast(text) {
                                             : 'text-rose-600'
                                     "
                                 >
-                                    {{ normFor(row) }} / {{ balanceFor(row) }}
+                                    {{ normFor(row).toFixed(1) }} / {{ balanceFor(row).toFixed(1) }}
                                 </span>
                             </div>
                         </td>
@@ -971,8 +1002,8 @@ function toast(text) {
                         {{ row.role }} • {{ row.department }}
                     </div>
                     <div class="mt-1 text-xs text-slate-600">
-                        Норма: <b>{{ normFor(row) }}</b> ч • План:
-                        <b>{{ plannedFor(row) }}</b> ч
+                        Норма: <b>{{ normFor(row).toFixed(1) }}</b> ч • План:
+                        <b>{{ plannedFor(row).toFixed(1) }}</b> ч
                     </div>
                 </div>
                 <div
@@ -983,7 +1014,7 @@ function toast(text) {
                             : 'bg-rose-50 text-rose-700 border border-rose-200'
                     "
                 >
-                    Баланс: {{ balanceFor(row) }} ч
+                    Баланс: {{ balanceFor(row).toFixed(1) }} ч
                 </div>
             </div>
             <div class="p-3 pt-0">
@@ -1035,18 +1066,17 @@ function toast(text) {
                             <option value="12n">12 часов (20–08)</option>
                             <option value="15h">15 часов (09–24)</option>
                             <option value="24h">24 часа (08–08)</option>
-                            <option value="7:12h">7 часов 12 минут (12:48-20:00)</option>
-                            <option value="7-12h">7 часов 12 минут (8:00–15:12)</option>
-                            <option value="6h">6 часов (8:00–14:00)</option>
-                            <option value="8:18h">8 часов 18 минут (8:00–16:18)</option>
-                            <option value="8-18h">8 часов 18 минут (11:42–20:00)</option>
 
+                            <option value="7:12h">7 часов 12 минут (12:48–20:00)</option>
+                            <option value="7-12h">7 часов 12 минут (08:00–15:12)</option>
+                            <option value="6h">6 часов (08:00–14:00)</option>
+                            <option value="8:18h">8 часов 18 минут (08:00–16:18)</option>
+                            <option value="8-18h">8 часов 18 минут (11:42–20:00)</option>
                             <option value="10h">10 часов (14:00–24:00)</option>
                             <option value="8-h">8 часов (00:00–08:00)</option>
-
                             <option value="7:36h">7 часов 42 минуты (16:18–24:00)</option>
-
                             <option value="16h">16 часов (08:00–24:00)</option>
+
                             <option value="home_day">
                                 Дежурство на дому (12–24)
                             </option>
@@ -1227,18 +1257,21 @@ function toast(text) {
 </template>
 
 <style>
-.grid-sticky th {
+/* Липкая строка с датами в шапке шахматки */
+.table-sticky-header thead tr {
     position: sticky;
     top: 0;
     z-index: 20;
     background: #f8fafc;
 }
+
 .col-sticky {
     position: sticky;
     left: 0;
     z-index: 10;
     background: white;
 }
+
 .drag-hover {
     outline: 2px dashed rgba(79, 70, 229, 0.6);
     outline-offset: -2px;
